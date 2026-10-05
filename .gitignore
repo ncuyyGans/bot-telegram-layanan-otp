@@ -1,0 +1,6 @@
+# Secret & data lokal — JANGAN di-commit
+secrets.json
+state.json
+bot.log
+__pycache__/
+*.pyc
