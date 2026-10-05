@@ -29,8 +29,10 @@ ENV_KEYS = {
     "ninjatop": "NINJATOP_API_KEY",
 }
 # nama konektor Secure Vault (fallback terakhir, khusus lingkungan Muse)
+# custom.telegram_otp dipakai, bukan custom.telegram, karena yang terakhir
+# sudah terisi token bot GrabFood (@grabnotifsy_bot) — jangan ditimpa.
 VAULT_CONNECTORS = {
-    "bot_token": "custom.telegram",
+    "bot_token": "custom.telegram_otp",
     "litensi": "custom.litensi",
     "otpinstan": "custom.otpinstan",
     "ninjatop": "custom.ninjatop",
