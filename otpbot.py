@@ -216,6 +216,7 @@ _lock = threading.Lock()
 _state = {"provider": "litensi", "otpinstan_server": "s1", "active_orders": {}}
 _wiz = {}          # chat_id -> wizard order yang sedang berjalan
 _pending_key = {}  # chat_id -> nama provider yang menunggu API key
+_pending_search = {}  # chat_id -> {"p": provider, "cid": country|None} (cari layanan)
 
 
 def load_state():
@@ -417,6 +418,7 @@ def wiz_services_page(chat_id, msg_id, p, pg, edit=True):
     nav = _page_nav(f"wsp:{p}", pg, total)
     if nav:
         rows.append(nav)
+    rows.append([btn("🔍 Cari layanan", "wfind")])
     rows.append([btn("❌ Batal", "wx")])
     txt = (f"🛒 <b>Order — {esc(PROVIDER_TITLES[p])}</b>\n"
            f"Pilih layanan (hal. {pg + 1}/{max(1, (total + PAGE - 1) // PAGE)}):")
@@ -521,6 +523,7 @@ def start_order(chat_id, p):
     if not prov:
         send_message(chat_id, need_key_text(p))
         return
+    _pending_search.pop(chat_id, None)
     _wiz[chat_id] = {"p": p, "service": None, "service_name": None,
                      "country": None, "country_name": None,
                      "operator": None, "price": None}
@@ -655,6 +658,7 @@ def cf_services_page(chat_id, msg_id, p, cid, pg):
     nav = _page_nav(f"{page_cb}:{cid}", pg, total)
     if nav:
         rows.append(nav)
+    rows.append([btn("🔍 Cari layanan", "wfind")])
     rows.append([btn("❌ Batal", "wx")])
     edit_message(chat_id, msg_id,
                  f"Pilih layanan (hal. {pg + 1}/{(total + PAGE - 1) // PAGE}):",
@@ -663,6 +667,66 @@ def cf_services_page(chat_id, msg_id, p, cid, pg):
 
 def wiz_oi_services(chat_id, msg_id, cid, pg):
     cf_services_page(chat_id, msg_id, "otpinstan", cid, pg)
+
+
+def do_search(chat_id, msg_id, query):
+    """Cari layanan dari kata kunci yang diketik user di chat."""
+    ctx = _pending_search.pop(chat_id, None)
+    if not ctx:
+        return
+    p, cid = ctx["p"], ctx.get("cid")
+    prov = get_provider(p)
+    if not prov:
+        send_message(chat_id, need_key_text(p))
+        return
+    q = query.strip().lower()
+    if not q:
+        send_message(chat_id, "Ketik nama layanannya dulu ya.",
+                     kb([[btn("🔍 Cari lagi", "wfind"),
+                          btn("❌ Batal", "wx")]]))
+        return
+    r = prov.get_services(cid)
+    if not r["ok"]:
+        send_message(chat_id, f"❌ {r['error']}",
+                     kb([[btn("🔍 Cari lagi", "wfind"),
+                          btn("❌ Batal", "wx")]]))
+        return
+
+    def _score(s):
+        name = str(s.get("name") or "").lower()
+        code = str(s.get("code") or "").lower()
+        if q == name or q == code:
+            return 0
+        if name.startswith(q) or code.startswith(q):
+            return 1
+        if q in name or q in code:
+            return 2
+        return 9
+
+    svcs = r["data"]["services"]
+    hits = sorted((s for s in svcs if _score(s) < 9),
+                  key=lambda s: (_score(s), str(s.get("name") or "")))[:15]
+    if not hits:
+        send_message(chat_id,
+                     f"🔍 Tidak ketemu layanan <b>{esc(query.strip())}</b>.\n"
+                     f"Coba kata kunci lain.",
+                     kb([[btn("🔍 Cari lagi", "wfind"),
+                          btn("❌ Batal", "wx")]]))
+        return
+    if p in ("otpinstan", "otpcepat"):
+        sel_cb = f"{'ws1' if p == 'otpinstan' else 'os1'}:{cid}:0:"
+    else:
+        sel_cb = f"ws:{p}:0:"
+    rows = []
+    for s in hits:
+        label = str(s["name"])[:24]
+        if s.get("price") is not None:
+            label += f" {rupiah(s['price'])}"
+        rows.append([btn(label, f"{sel_cb}{s['code']}")])
+    rows.append([btn("🔍 Cari lagi", "wfind"), btn("❌ Batal", "wx")])
+    send_message(chat_id,
+                 f"🔍 Hasil cari <b>{esc(query.strip())}</b> ({len(hits)}):",
+                 kb(rows))
 
 
 def do_order(chat_id, msg_id):
@@ -1041,6 +1105,11 @@ def handle_message(msg):
         save_api_key(chat_id, msg_id, p, text)
         return
 
+    # aliran cari layanan: pesan teks berikutnya adalah kata kunci
+    if chat_id in _pending_search and not text.startswith("/"):
+        do_search(chat_id, msg_id, text)
+        return
+
     if not text.startswith("/"):
         return
     parts = text.split()
@@ -1050,6 +1119,7 @@ def handle_message(msg):
 
     if cmd == "/start":
         _pending_key.pop(chat_id, None)
+        _pending_search.pop(chat_id, None)
         send_start(chat_id)
     elif cmd == "/setkey":
         if arg not in PROVIDER_CLASSES:
@@ -1281,6 +1351,26 @@ def handle_callback(q):
             wiz_confirm(chat_id, msg_id, w)
         elif cmd == "wgo":
             do_order(chat_id, msg_id)
+        elif cmd == "wfind":
+            w = _wiz.get(chat_id)
+            if not w:
+                return
+            _pending_search[chat_id] = {"p": w["p"],
+                                       "cid": w.get("country")}
+            send_message(chat_id,
+                         "🔍 <b>Cari layanan</b>\n"
+                         "Ketik nama layanannya, mis. <i>whatsapp</i>, "
+                         "<i>telegram</i>, <i>dana</i>.",
+                         kb([[btn("❌ Batal", "wxfind")]]))
+        elif cmd == "wxfind":
+            ctx = _pending_search.pop(chat_id, None)
+            if not ctx:
+                return
+            p, cid = ctx["p"], ctx.get("cid")
+            if cid:
+                cf_services_page(chat_id, msg_id, p, cid, 0)
+            else:
+                wiz_services_page(chat_id, msg_id, p, 0)
         elif cmd == "wx":
             _wiz.pop(chat_id, None)
             edit_message(chat_id, msg_id, "❌ Order dibatalkan.",
