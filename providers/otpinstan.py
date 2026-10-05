@@ -28,6 +28,10 @@ SERVERS = {
 
 CANCEL_MIN_AGE = 120  # detik; aturan anti-abuse OTP Instan
 
+# balance.php & history.php adalah endpoint SHARED — selalu di base ini,
+# tidak mengikuti base server (s1..s5).
+SHARED_BASE = "https://otpinstan.com/api/reseller/"
+
 
 class OTPInstanProvider(OTPProvider):
     name = "otpinstan"
@@ -81,10 +85,15 @@ class OTPInstanProvider(OTPProvider):
 
     # -- API --
     def get_balance(self):
-        # endpoint shared — bisa dipanggil dari base mana pun
-        r, err = self._req("GET", "balance.php")
-        if err:
-            return fail(err)
+        # endpoint shared — selalu pakai SHARED_BASE, bukan base server
+        r = http_request("GET", SHARED_BASE + "balance.php",
+                         headers=self._headers())
+        if r["error"]:
+            return fail("🌐 Gangguan jaringan: " + r["error"])
+        if r["http"] == 401:
+            return fail("🔑 API key salah — cek lagi dengan /setkey otpinstan.")
+        if r["http"] == 403:
+            return fail("⛔ Akun dinonaktifkan — hubungi OTP Instan.")
         d = r["json"] if isinstance(r["json"], dict) else {}
         if d.get("success") and "balance" in d:
             try:

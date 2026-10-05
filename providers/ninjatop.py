@@ -34,8 +34,16 @@ class NinjaTopProvider(OTPProvider):
     }
 
     # -- internal --
+    # NinjaOTP memakai Cloudflare Browser Integrity Check: request tanpa
+    # User-Agent browser diblokir (error 1010). Wajib kirim UA browser.
+    BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/126.0.0.0 Safari/537.36")
+
     def _headers(self):
-        return {"Authorization": "Bearer " + self.api_key}
+        return {"Authorization": "Bearer " + self.api_key,
+                "User-Agent": self.BROWSER_UA,
+                "Accept": "application/json"}
 
     def _req(self, method, path, params=None, json_body=None,
              extra_headers=None):
@@ -52,6 +60,11 @@ class NinjaTopProvider(OTPProvider):
         if r["http"] == 401:
             return None, self.translate("UNAUTHENTICATED")
         if r["http"] == 403:
+            # bedakan blokir Cloudflare (WAF) vs FORBIDDEN dari API-nya
+            body = (r["text"] or "").lower()
+            if "cloudflare" in body or "error code:" in body:
+                return None, ("🛡️ Diblokir proteksi Cloudflare NinjaOTP — "
+                              "coba lagi sebentar.")
             return None, self.translate("FORBIDDEN")
         if r["http"] == 429:
             return None, self.translate("RATE_LIMITED")
