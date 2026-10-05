@@ -1015,6 +1015,9 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 <b>Alur order:</b> pilih layanan → (pilih negara) → konfirmasi harga →
 nomor keluar → bot memantau SMS tiap 5 detik → kode OTP dikirim otomatis.
 
+<i>Tips: di daftar layanan ada tombol 🔍 Cari — ketik saja namanya,
+nggak perlu geser-geser halaman.</i>
+
 <i>Contoh: /setkey litensi lalu kirim key-nya.
 Contoh: /order ninjatop</i>
 """
