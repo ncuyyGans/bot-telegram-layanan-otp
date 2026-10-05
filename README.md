@@ -10,9 +10,10 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 
 | Provider | Auth | Negara | Catatan |
 |---|---|---|---|
-| **Litensi** | `api_key` di query | Ya (pilih negara) | API gaya sms-activate |
+| **Litensi** | `api_key` di query | Ya (pilih negara) | API gaya sms-activate; bisa pilih operator (Telkomsel/dll) |
 | **OTP Instan** | Header `X-Api-Key` | Ya (negara dulu, baru layanan) | 5 server (s1–s5), bisa ganti via /server atau menu ⚙️ |
 | **NinjaOTP** | Header `Authorization: Bearer nk_xxxx` | Tidak | Harga+stok langsung per layanan |
+| **OTPCepat** | `api_key` di query | Ya (negara dulu, baru layanan) | 46 negara (tidak ada Indonesia) |
 
 ## Cara pakai
 
@@ -24,6 +25,7 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 - **Litensi**: dashboard litensi.id → API key.
 - **OTP Instan**: halaman API Key di dashboard → generate key.
 - **NinjaOTP**: dashboard → menu "API Keys" (format `nk_xxxx`).
+- **OTPCepat**: dashboard otpcepat.org → API key.
 
 ### 3. Isi secrets.json
 ```bash
@@ -35,9 +37,10 @@ chmod 600 secrets.json
 untuk tahu ID-mu). Bot **hanya** melayani chat ini — chat lain diabaikan.
 
 > Alternatif: token & owner bisa via env `TELEGRAM_BOT_TOKEN` dan
-> `OWNER_CHAT_ID` (env diprioritaskan). API key juga bisa diisi dari dalam
-> bot dengan perintah `/setkey` — pesan berisi key otomatis dihapus setelah
-> tersimpan.
+> `OWNER_CHAT_ID` (env diprioritaskan). API key tiap provider juga bisa via
+> env: `LITENSI_API_KEY`, `OTPINSTAN_API_KEY`, `NINJATOP_API_KEY`,
+> `OTPCEPAT_API_KEY`. Atau isi dari dalam bot dengan perintah `/setkey` —
+> pesan berisi key otomatis dihapus setelah tersimpan.
 
 ### 4. Jalankan
 ```bash
@@ -63,15 +66,19 @@ dipolling tersimpan di `state.json` dan dilanjutkan setelah restart.
 | `/order [provider]` | Mulai wizard order nomor |
 | `/batal <order_id>` | Batalkan order aktif |
 | `/server` | Ganti server OTP Instan (s1–s5) |
-| `/setkey <litensi\|otpinstan\|ninjatop>` | Simpan API key via chat |
+| `/setkey <provider>` | Simpan API key via chat (`litensi\|otpinstan\|ninjatop\|otpcepat`) |
 | `/bantuan` | Bantuan |
 
 ## Alur order
 
-1. `/order` → pilih layanan (tombol, ada halaman bila banyak).
+1. `/order` → pilih layanan (tombol, ada halaman bila banyak; ada tombol
+   **🔍 Cari** — ketik nama layanan di chat, tidak perlu geser halaman).
 2. Pilih negara → tampil harga termurah + stok → ✅ Order.
    - *NinjaOTP*: langkah negara dilewati (tidak ada konsep negara).
-   - *OTP Instan*: urutan dibalik — pilih negara dulu, baru layanan.
+   - *OTP Instan & OTPCepat*: urutan dibalik — pilih negara dulu, baru
+     layanan (API-nya mewajibkan negara untuk daftar layanan).
+   - *Litensi & OTPCepat*: ada langkah pilih operator (mis. Telkomsel,
+     Indosat, atau "Bebas/Acak" = termurah).
 3. Nomor HP + Order ID dikirim (nomor bisa diketuk untuk salin).
 4. Bot polling tiap 5 detik. Saat OTP masuk → kode dikirim **besar** +
    tombol **✅ Selesai** / **🔁 Minta Ulang** / **❌ Batalkan**.
@@ -86,6 +93,9 @@ Catatan perilaku per provider:
   dengan hitung mundur bila terlalu cepat.
 - **NinjaOTP**: Selesai = `POST /orders/{id}/ack`, Batal = `POST …/cancel`
   (refund penuh), Minta ulang = `POST …/resend` (gratis).
+- **OTPCepat**: Selesai = `set_status 4`, Batal = `set_status 2` (refund),
+  Minta ulang = `set_status 3`. Status order: `Waiting SMS` → `Recieved`
+  (kode diekstrak dari isi SMS) → `Done`/`Cancel`.
 
 ## File
 
@@ -94,9 +104,11 @@ bot-telegram-otp/
 ├── otpbot.py            # main loop long-polling + wizard + poller
 ├── providers/
 │   ├── base.py          # interface + HTTP helper (retry/backoff)
-│   ├── litensi.py
+│   ├── litensi.py       # + get_operators (pilih operator)
 │   ├── otpinstan.py     # server s1–s5 (s1 penuh, s2–s5 best-effort)
-│   └── ninjatop.py
+│   ├── ninjatop.py      # kirim UA browser (lolos Cloudflare)
+│   ├── otpcepat.py
+│   └── vault.py         # baca secret dari Secure Vault (khusus env Muse)
 ├── secrets.json         # token, owner, API key (GITAIGNORE, chmod 600)
 ├── secrets.example.json # contoh format
 ├── state.json           # order aktif (GITAIGNORE) — lanjut setelah restart
@@ -104,6 +116,10 @@ bot-telegram-otp/
 ├── run.sh / watchdog.sh
 └── README.md
 ```
+
+> `providers/vault.py` hanya relevan bila bot dijalankan di lingkungan
+> Muse (membaca kredensial dari Secure Vault). Di server lain, abaikan —
+> pakai env var atau `secrets.json`.
 
 ## Keamanan
 
