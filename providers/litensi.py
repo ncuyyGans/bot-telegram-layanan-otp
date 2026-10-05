@@ -119,10 +119,21 @@ class LitensiProvider(OTPProvider):
         options.sort(key=lambda o: o["price"])
         return ok({"options": options})
 
-    def order(self, service, country=None, max_price=None):
+    def get_operators(self, country):
+        """Daftar operator seluler untuk negara tertentu, mis. Indonesia ->
+        ["indosat","telkomsel","axis","three","smartfren"]."""
+        r, err = self._get("getOperators", {"country": country})
+        if err:
+            return fail(err)
+        d = r["json"] if isinstance(r["json"], dict) else {}
+        ops = ((d.get("countryOperators") or {}).get(str(country)) or [])
+        return ok({"operators": [str(o) for o in ops if o]})
+
+    def order(self, service, country=None, max_price=None, operator="any"):
         if not country:
             return fail("Negara wajib dipilih untuk Litensi.")
-        params = {"service": service, "country": country, "operator": "any"}
+        params = {"service": service, "country": country,
+                  "operator": operator or "any"}
         if max_price:
             params["maxPrice"] = max_price
         r, err = self._get("getNumber", params)
