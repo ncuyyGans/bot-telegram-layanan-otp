@@ -112,8 +112,10 @@ class OTPInstanProvider(OTPProvider):
         for c in items:
             if not isinstance(c, dict):
                 continue
-            cid = str(c.get("id") or c.get("country_id") or c.get("code") or "")
-            name = c.get("name") or c.get("country") or cid
+            cid = str(c.get("country_id") or c.get("id")
+                      or c.get("code") or "")
+            name = (c.get("country_name") or c.get("name")
+                    or c.get("country") or cid)
             if cid:
                 out.append({"id": cid, "name": name})
         if not out:
@@ -121,25 +123,34 @@ class OTPInstanProvider(OTPProvider):
         return ok({"countries": out})
 
     def get_services(self, country=None):
-        params = {"country_id_": country} if country else {}
+        # API live memakai param "country_id" (tanpa underscore).
+        params = {"country_id": country} if country else {}
         r, err = self._req("GET", "services.php", params=params)
         if err:
             return fail(err)
         items = self._as_list(r["json"])
-        out = []
+        best = {}  # platform_id -> entri termurah (satu platform bisa
+        # muncul beberapa kali dari supplier berbeda)
         for s in items:
             if not isinstance(s, dict):
                 continue
             code = str(s.get("platform_id") or s.get("service_kode")
                        or s.get("service_angka") or s.get("product_id")
                        or s.get("id") or "")
-            name = s.get("platform_name") or s.get("name") or code
+            if not code:
+                continue
+            name = (s.get("service_name") or s.get("platform_name")
+                    or s.get("name") or code)
             price = self._num(s.get("price") or s.get("harga"))
             stock = self._num(s.get("stock") or s.get("stok")
                               or s.get("available"))
-            if code:
-                out.append({"code": code, "name": name,
-                            "price": price, "stock": stock})
+            cur = best.get(code)
+            if cur is None or (price is not None and
+                               (cur["price"] is None or price < cur["price"])):
+                best[code] = {"code": code, "name": name,
+                              "price": price, "stock": stock}
+        out = sorted(best.values(),
+                     key=lambda x: (x["price"] is None, x["price"] or 0))
         if not out:
             return fail(self._err(r["json"] if isinstance(r["json"], dict)
                                   else {}))
