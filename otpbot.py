@@ -27,6 +27,7 @@ ENV_KEYS = {
     "litensi": "LITENSI_API_KEY",
     "otpinstan": "OTPINSTAN_API_KEY",
     "ninjatop": "NINJATOP_API_KEY",
+    "otpcepat": "OTPCEPAT_API_KEY",
 }
 # nama konektor Secure Vault (fallback terakhir, khusus lingkungan Muse)
 # custom.telegram_otp dipakai, bukan custom.telegram, karena yang terakhir
@@ -36,6 +37,7 @@ VAULT_CONNECTORS = {
     "litensi": "custom.litensi",
     "otpinstan": "custom.otpinstan",
     "ninjatop": "custom.ninjatop",
+    "otpcepat": "custom.otpcepat",
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -290,7 +292,7 @@ def parse_expire(expire_at):
 # ---------------------------------------------------------------- menu & wizard
 def provider_rows():
     rows = []
-    for p in ("litensi", "otpinstan", "ninjatop"):
+    for p in PROVIDER_CLASSES:
         mark = "✅" if has_key(p) else "🔑"
         rows.append([btn(f"{mark} {PROVIDER_TITLES[p]}", f"prov:{p}")])
     return rows
@@ -349,9 +351,9 @@ def do_services(chat_id, msg_id, p):
         edit_message(chat_id, msg_id, need_key_text(p),
                      kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
-    if p == "otpinstan":
-        # services.php OTP Instan wajib pakai country -> pilih negara dulu
-        oi_countries_page(chat_id, msg_id, 0, edit=True, mode="list")
+    if p in ("otpinstan", "otpcepat"):
+        # services.php kedua provider ini wajib pakai country -> pilih dulu
+        cf_countries_page(chat_id, msg_id, 0, p, edit=True, mode="list")
         return
     r = prov.get_services()
     title = PROVIDER_TITLES.get(p, p)
@@ -455,23 +457,28 @@ def wiz_countries_page(chat_id, msg_id, p, svc, pg):
 
 
 def wiz_operators_page(chat_id, msg_id, p, svc, cid):
-    """Langkah pilih operator (khusus Litensi)."""
+    """Langkah pilih operator (Litensi & OTPCepat)."""
     prov = get_provider(p)
     ops = []
     if prov:
         r = prov.get_operators(cid)
         if r["ok"]:
             ops = r["data"]["operators"]
-    rows = [[btn("🌐 Bebas (termurah)", "wo:any")]]
+    if p == "otpcepat":
+        random_op, random_label = "random", "🎲 Acak"
+    else:
+        random_op, random_label = "any", "🌐 Bebas (termurah)"
+    rows = [[btn(random_label, f"wo:{random_op}")]]
     for i in range(0, len(ops), 2):
+        if ops[i] in ("any", "random"):
+            continue
         row = [btn(f"📶 {ops[i].capitalize()}", f"wo:{ops[i]}")]
-        if i + 1 < len(ops):
+        if i + 1 < len(ops) and ops[i + 1] not in ("any", "random"):
             row.append(btn(f"📶 {ops[i + 1].capitalize()}", f"wo:{ops[i + 1]}"))
         rows.append(row)
     rows.append([btn("❌ Batal", "wx")])
     edit_message(chat_id, msg_id,
-                 f"Pilih operator nomor untuk <b>{esc(svc)}</b>:\n"
-                 f"<i>\"Bebas\" = dipilihkan yang termurah.</i>",
+                 f"Pilih operator nomor untuk <b>{esc(svc)}</b>:",
                  kb(rows))
 
 
@@ -496,9 +503,8 @@ def wiz_confirm(chat_id, msg_id, w):
              f"Layanan: <b>{esc(w.get('service_name') or w['service'])}</b>"]
     if w.get("country_name"):
         lines.append(f"Negara: <b>{esc(w['country_name'])}</b>")
-    if w.get("operator"):
-        op = w["operator"]
-        lines.append(f"Operator: <b>{esc('Bebas (termurah)' if op == 'any' else op.capitalize())}</b>")
+    if w.get("operator_name"):
+        lines.append(f"Operator: <b>{esc(w['operator_name'])}</b>")
     if best["price"] is not None:
         lines.append(f"Harga: <b>{rupiah(best['price'])}</b>")
     if best.get("stock") is not None:
@@ -520,31 +526,41 @@ def start_order(chat_id, p):
                      "operator": None, "price": None}
     if p == "otpinstan":
         wiz_oi_countries(chat_id, None, 0, edit=False)
+    elif p == "otpcepat":
+        cf_countries_page(chat_id, None, 0, "otpcepat", edit=False,
+                          mode="order")
     else:
         wiz_services_page(chat_id, None, p, 0, edit=False)
 
 
-# -- pilih negara OTP Instan (dipakai wizard order & daftar layanan) --
-def oi_countries_page(chat_id, msg_id, pg, edit=True, mode="order"):
-    """mode='order': lanjut ke pilih layanan untuk order (callback wc1c).
-    mode='list': tampilkan daftar layanan negara tsb (callback sl1c)."""
-    prov = get_provider("otpinstan")
+# -- pilih negara untuk provider country-first (otpinstan, otpcepat) --
+# dipakai wizard order (mode='order') & daftar layanan (mode='list')
+CF_PREFIXES = {
+    ("otpinstan", "order"): ("wc1c", "wc1"),
+    ("otpinstan", "list"): ("sl1c", "sl1"),
+    ("otpcepat", "order"): ("oc1c", "oc1"),
+    ("otpcepat", "list"): ("sc1c", "sc1"),
+}
+
+
+def cf_countries_page(chat_id, msg_id, pg, p, edit=True, mode="order"):
+    prov = get_provider(p)
     r = prov.get_countries() if prov else {"ok": False}
     if not r["ok"]:
-        txt = need_key_text("otpinstan") if not prov else f"❌ {r.get('error')}"
+        txt = need_key_text(p) if not prov else f"❌ {r.get('error')}"
         if edit:
             edit_message(chat_id, msg_id, txt,
-                         kb([[btn("◀️ Kembali", "prov:otpinstan")]]))
+                         kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         else:
             send_message(chat_id, txt)
         return
+    cb_sel, cb_page = CF_PREFIXES[(p, mode)]
+    title = PROVIDER_TITLES.get(p, p)
     if mode == "list":
-        cb_sel, cb_page = "sl1c", "sl1"
-        title = "📋 <b>Layanan — OTP Instan</b>"
-        cancel = [[btn("◀️ Kembali", "prov:otpinstan")]]
+        head = f"📋 <b>Layanan — {esc(title)}</b>"
+        cancel = [[btn("◀️ Kembali", f"prov:{p}")]]
     else:
-        cb_sel, cb_page = "wc1c", "wc1"
-        title = "🛒 <b>Order — OTP Instan</b>"
+        head = f"🛒 <b>Order — {esc(title)}</b>"
         cancel = [[btn("❌ Batal", "wx")]]
     ctys = r["data"]["countries"]
     total = len(ctys)
@@ -561,7 +577,7 @@ def oi_countries_page(chat_id, msg_id, pg, edit=True, mode="order"):
     if nav:
         rows.append(nav)
     rows.extend(cancel)
-    txt = (f"{title}\n"
+    txt = (f"{head}\n"
            f"Pilih negara (hal. {pg + 1}/{max(1, (total + PAGE - 1) // PAGE)}):")
     if edit:
         edit_message(chat_id, msg_id, txt, kb(rows))
@@ -570,21 +586,23 @@ def oi_countries_page(chat_id, msg_id, pg, edit=True, mode="order"):
 
 
 def wiz_oi_countries(chat_id, msg_id, pg, edit=True):
-    oi_countries_page(chat_id, msg_id, pg, edit=edit, mode="order")
+    cf_countries_page(chat_id, msg_id, pg, "otpinstan", edit=edit,
+                      mode="order")
 
 
-def show_oi_services(chat_id, msg_id, cid):
-    """Tampilkan daftar layanan OTP Instan untuk satu negara."""
-    prov = get_provider("otpinstan")
+def cf_show_services(chat_id, msg_id, p, cid):
+    """Tampilkan daftar layanan satu negara (mode list)."""
+    prov = get_provider(p)
     r = prov.get_services(cid) if prov else {"ok": False}
+    title = PROVIDER_TITLES.get(p, p)
     if not r["ok"]:
         edit_message(chat_id, msg_id,
-                     f"❌ Gagal ambil layanan OTP Instan:\n{r.get('error', '?')}",
-                     kb([[btn("◀️ Kembali", "prov:otpinstan")]]))
+                     f"❌ Gagal ambil layanan {esc(title)}:\n{r.get('error', '?')}",
+                     kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
     svcs = r["data"]["services"]
     cname = _cty_name(prov, cid)
-    lines = [f"📋 <b>Layanan OTP Instan — {esc(cname)}</b> ({len(svcs)})"]
+    lines = [f"📋 <b>Layanan {esc(title)} — {esc(cname)}</b> ({len(svcs)})"]
     for s in svcs[:60]:
         extra = ""
         if s.get("price") is not None:
@@ -595,24 +613,37 @@ def show_oi_services(chat_id, msg_id, cid):
     if len(svcs) > 60:
         lines.append(f"<i>…dan {len(svcs) - 60} lainnya.</i>")
     edit_message(chat_id, msg_id, "\n".join(lines),
-                 kb([[btn("🛒 Order Nomor", "ord:otpinstan"),
-                      btn("◀️ Kembali", "prov:otpinstan")]]))
+                 kb([[btn("🛒 Order Nomor", f"ord:{p}"),
+                      btn("◀️ Kembali", f"prov:{p}")]]))
 
 
-def wiz_oi_services(chat_id, msg_id, cid, pg):
-    prov = get_provider("otpinstan")
+def show_oi_services(chat_id, msg_id, cid):
+    cf_show_services(chat_id, msg_id, "otpinstan", cid)
+
+
+# callback prefixes untuk halaman layanan (country-first, mode order)
+CF_SVC_PREFIXES = {
+    "otpinstan": ("ws1", "wsp1"),
+    "otpcepat": ("os1", "osp1"),
+}
+
+
+def cf_services_page(chat_id, msg_id, p, cid, pg):
+    """Pilih layanan satu negara (country-first, mode order)."""
+    prov = get_provider(p)
     r = prov.get_services(cid) if prov else {"ok": False}
     if not r["ok"]:
         edit_message(chat_id, msg_id,
                      f"❌ {r.get('error', 'gagal ambil layanan')}",
-                     kb([[btn("◀️ Kembali", "prov:otpinstan")]]))
+                     kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
     svcs = r["data"]["services"]
     total = len(svcs)
     if not total:
         edit_message(chat_id, msg_id, "📵 Tidak ada layanan di negara ini.",
-                     kb([[btn("◀️ Kembali", "prov:otpinstan")]]))
+                     kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
+    sel_cb, page_cb = CF_SVC_PREFIXES[p]
     pg = max(0, min(pg, (total - 1) // PAGE))
     chunk = svcs[pg * PAGE:(pg + 1) * PAGE]
     rows = []
@@ -620,14 +651,18 @@ def wiz_oi_services(chat_id, msg_id, cid, pg):
         label = s["name"][:22]
         if s.get("price") is not None:
             label += f" {rupiah(s['price'])}"
-        rows.append([btn(label, f"ws1:{cid}:{pg}:{s['code']}")])
-    nav = _page_nav(f"wsp1:{cid}", pg, total)
+        rows.append([btn(label, f"{sel_cb}:{cid}:{pg}:{s['code']}")])
+    nav = _page_nav(f"{page_cb}:{cid}", pg, total)
     if nav:
         rows.append(nav)
     rows.append([btn("❌ Batal", "wx")])
     edit_message(chat_id, msg_id,
                  f"Pilih layanan (hal. {pg + 1}/{(total + PAGE - 1) // PAGE}):",
                  kb(rows))
+
+
+def wiz_oi_services(chat_id, msg_id, cid, pg):
+    cf_services_page(chat_id, msg_id, "otpinstan", cid, pg)
 
 
 def do_order(chat_id, msg_id):
@@ -642,6 +677,9 @@ def do_order(chat_id, msg_id):
     if p == "litensi":
         r = prov.order(w["service"], w.get("country"),
                        operator=w.get("operator") or "any")
+    elif p == "otpcepat":
+        r = prov.order(w["service"], w.get("country"),
+                       operator=w.get("operator") or "random")
     elif prov.has_countries:
         r = prov.order(w["service"], w.get("country"))
     else:
@@ -884,6 +922,14 @@ def poll_tick():
                     f"berstatus <b>{esc(st)}</b> di provider — "
                     f"dihentikan dari pantauan.")
                 log.info("order %s status %s, dihentikan", okey, st)
+            elif st == "done":
+                remove_order(okey)
+                msg = (f"✅ Order <code>{esc(rec['order_id'])}</code> "
+                       f"selesai di provider.")
+                if code:
+                    msg += f"\n📩 Kode OTP: <code>{esc(code)}</code>"
+                send_message(OWNER, msg)
+                log.info("order %s done, dihentikan", okey)
         except Exception:
             log.exception("poll order %s", okey)
 
@@ -898,7 +944,8 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 /order [provider] — order nomor baru
 /batal &lt;order_id&gt; — batalkan order aktif
 /server — ganti server OTP Instan (s1..s5)
-/setkey &lt;litensi|otpinstan|ninjatop&gt; — simpan API key
+/setkey &lt;provider&gt; — simpan API key
+<i>provider: litensi|otpinstan|ninjatop|otpcepat</i>
 /bantuan — pesan ini
 
 <b>Alur order:</b> pilih layanan → (pilih negara) → konfirmasi harga →
@@ -912,7 +959,7 @@ Contoh: /order ninjatop</i>
 def cmd_balance(chat_id, p):
     if not p:
         lines = ["💰 <b>Saldo semua provider</b>"]
-        for name in ("litensi", "otpinstan", "ninjatop"):
+        for name in PROVIDER_CLASSES:
             prov = get_provider(name)
             if not prov:
                 lines.append(f"• {PROVIDER_TITLES[name]}: <i>key belum diisi</i>")
@@ -937,6 +984,10 @@ def cmd_services(chat_id, p):
     prov = get_provider(p)
     if not prov:
         send_message(chat_id, need_key_text(p))
+        return
+    if p in ("otpinstan", "otpcepat"):
+        # daftar layanan kedua provider ini wajib pakai negara
+        cf_countries_page(chat_id, None, 0, p, edit=False, mode="list")
         return
     r = prov.get_services()
     if not r["ok"]:
@@ -1003,7 +1054,7 @@ def handle_message(msg):
     elif cmd == "/setkey":
         if arg not in PROVIDER_CLASSES:
             send_message(chat_id,
-                         "Pakai: <code>/setkey litensi|otpinstan|ninjatop</code>")
+                         "Pakai: <code>/setkey litensi|otpinstan|ninjatop|otpcepat</code>")
             return
         _pending_key[chat_id] = arg
         send_message(chat_id,
@@ -1053,8 +1104,11 @@ def show_servers(chat_id, msg_id):
 
 
 # ---------------------------------------------------------------- callbacks
-def _svc_name(prov, code):
-    r = prov.get_services()
+def _svc_name(prov, code, country=None):
+    try:
+        r = prov.get_services(country) if country else prov.get_services()
+    except TypeError:
+        r = prov.get_services()
     if r["ok"]:
         for s in r["data"]["services"]:
             if str(s["code"]) == str(code):
@@ -1163,12 +1217,48 @@ def handle_callback(q):
             if not w or not w.get("service"):
                 return
             w["operator"] = op
+            if op in ("any", "random"):
+                w["operator_name"] = ("Bebas (termurah)"
+                                     if w["p"] == "litensi" else "Acak")
+            else:
+                w["operator_name"] = op.capitalize()
             wiz_confirm(chat_id, msg_id, w)
         # -- daftar layanan OTP Instan: pilih negara dulu --
         elif cmd == "sl1":
-            oi_countries_page(chat_id, msg_id, int(parts[1]), mode="list")
+            cf_countries_page(chat_id, msg_id, 0, "otpinstan", mode="list")
         elif cmd == "sl1c":
-            show_oi_services(chat_id, msg_id, ":".join(parts[1:]))
+            cf_show_services(chat_id, msg_id, "otpinstan", ":".join(parts[1:]))
+        # -- daftar layanan OTPCepat: pilih negara dulu --
+        elif cmd == "sc1":
+            cf_countries_page(chat_id, msg_id, int(parts[1]), "otpcepat",
+                              mode="list")
+        elif cmd == "sc1c":
+            cf_show_services(chat_id, msg_id, "otpcepat", ":".join(parts[1:]))
+        # -- wizard OTPCepat: negara -> layanan -> operator --
+        elif cmd == "oc1":
+            cf_countries_page(chat_id, msg_id, int(parts[1]), "otpcepat",
+                              mode="order")
+        elif cmd == "oc1c":
+            cid = ":".join(parts[1:])
+            prov = get_provider("otpcepat")
+            w = _wiz.setdefault(chat_id, {"p": "otpcepat"})
+            w.update({"p": "otpcepat", "country": cid,
+                      "country_name": _cty_name(prov, cid),
+                      "service": None, "service_name": None,
+                      "operator": None})
+            cf_services_page(chat_id, msg_id, "otpcepat", cid, 0)
+        elif cmd == "osp1":
+            cf_services_page(chat_id, msg_id, "otpcepat", parts[1],
+                             int(parts[2]))
+        elif cmd == "os1":
+            cid, pg, sid = parts[1], int(parts[2]), ":".join(parts[3:])
+            prov = get_provider("otpcepat")
+            w = _wiz.setdefault(chat_id, {"p": "otpcepat"})
+            w.update({"service": sid,
+                      "service_name": _svc_name(prov, sid, cid),
+                      "operator": None})
+            wiz_operators_page(chat_id, msg_id, "otpcepat",
+                               w["service_name"] or sid, cid)
         # -- wizard OTP Instan: negara dulu, baru layanan --
         elif cmd == "wc1":
             wiz_oi_countries(chat_id, msg_id, int(parts[1]))
@@ -1187,7 +1277,7 @@ def handle_callback(q):
             prov = get_provider("otpinstan")
             w = _wiz.setdefault(chat_id, {"p": "otpinstan"})
             w.update({"service": pid,
-                      "service_name": _svc_name(prov, pid)})
+                      "service_name": _svc_name(prov, pid, cid)})
             wiz_confirm(chat_id, msg_id, w)
         elif cmd == "wgo":
             do_order(chat_id, msg_id)
