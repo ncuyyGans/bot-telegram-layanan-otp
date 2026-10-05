@@ -32,14 +32,25 @@ class OTPCepatProvider(OTPProvider):
     }
 
     # -- internal --
+    # OTPCepat memakai Cloudflare Browser Integrity Check: request tanpa
+    # User-Agent browser diblokir (error 1010). Wajib kirim UA browser.
+    BROWSER_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) "
+                  "Chrome/126.0.0.0 Safari/537.36")
+
     def _get(self, action, params=None):
         q = {"api_key": self.api_key, "action": action}
         q.update(params or {})
         # safe=":" agar surrogate vault (hsurr:...) tidak ter-encode
         url = BASE_URL + "?" + urllib.parse.urlencode(q, safe=":")
-        r = http_request("GET", url)
+        r = http_request("GET", url,
+                         headers={"User-Agent": self.BROWSER_UA,
+                                  "Accept": "application/json"})
         if r["error"]:
             return None, "🌐 Gangguan jaringan: " + r["error"]
+        if r["http"] == 403 and "error code:" in (r["text"] or "").lower():
+            return None, ("🛡️ Diblokir proteksi Cloudflare OTPCepat — "
+                          "coba lagi sebentar.")
         return r, None
 
     @staticmethod
