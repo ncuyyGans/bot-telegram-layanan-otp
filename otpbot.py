@@ -19,6 +19,22 @@ import urllib.error
 from datetime import datetime, timezone
 
 from providers import PROVIDER_CLASSES, PROVIDER_TITLES
+from providers.vault import vault_surrogate, vault_connected
+
+# env var per secret (prioritas tertinggi, untuk portabilitas)
+ENV_KEYS = {
+    "bot_token": "TELEGRAM_BOT_TOKEN",
+    "litensi": "LITENSI_API_KEY",
+    "otpinstan": "OTPINSTAN_API_KEY",
+    "ninjatop": "NINJATOP_API_KEY",
+}
+# nama konektor Secure Vault (fallback terakhir, khusus lingkungan Muse)
+VAULT_CONNECTORS = {
+    "bot_token": "custom.telegram",
+    "litensi": "custom.litensi",
+    "otpinstan": "custom.otpinstan",
+    "ninjatop": "custom.ninjatop",
+}
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SECRETS_PATH = os.path.join(BASE_DIR, "secrets.json")
@@ -54,11 +70,38 @@ def save_secrets(s):
     os.replace(tmp, SECRETS_PATH)
 
 
+def resolve_secret(name):
+    """Ambil secret: env var -> secrets.json -> Secure Vault. '' bila kosong.
+
+    Nilai dari vault adalah surrogate yang hanya valid di lingkungan Muse
+    (diganti nilai asli oleh egress proxy saat request keluar).
+    """
+    env_name = ENV_KEYS.get(name)
+    if env_name:
+        v = os.environ.get(env_name, "").strip()
+        if v:
+            return v
+    if name == "bot_token":
+        v = (load_secrets().get("bot_token") or "").strip()
+    else:
+        v = ((load_secrets().get("api_keys") or {}).get(name) or "").strip()
+    if v:
+        return v
+    connector = VAULT_CONNECTORS.get(name)
+    return vault_surrogate(connector) if connector else ""
+
+
+def has_secret(name):
+    if resolve_secret(name):
+        return True
+    # vault_connected dipanggil ulang agar status segar bila user baru
+    # menyelesaikan kartu Secure Vault setelah bot berjalan
+    connector = VAULT_CONNECTORS.get(name)
+    return bool(connector and vault_connected(connector))
+
+
 def get_token():
-    tok = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
-    if tok:
-        return tok
-    return (load_secrets().get("bot_token") or "").strip()
+    return resolve_secret("bot_token")
 
 
 def get_owner():
@@ -147,7 +190,7 @@ def mask_key(key):
 
 
 def has_key(name):
-    return bool((load_secrets().get("api_keys") or {}).get(name))
+    return has_secret(name)
 
 
 def get_provider(name):
@@ -155,7 +198,7 @@ def get_provider(name):
     panggil agar /setkey langsung berlaku). Return None bila key kosong."""
     if name not in PROVIDER_CLASSES:
         return None
-    key = (load_secrets().get("api_keys") or {}).get(name, "")
+    key = resolve_secret(name)
     if not key:
         return None
     if name == "otpinstan":

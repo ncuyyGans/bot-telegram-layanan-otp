@@ -35,7 +35,10 @@ class LitensiProvider(OTPProvider):
     def _get(self, action, params=None):
         q = {"action": action, "api_key": self.api_key}
         q.update(params or {})
-        url = BASE_URL + "?" + urllib.parse.urlencode(q)
+        # safe=":" -> surrogate vault (hsurr:...) tidak boleh ter-encode,
+        # kalau tidak egress proxy tidak mengenalinya (quirk yang sama
+        # seperti pada URL path Bot API Telegram).
+        url = BASE_URL + "?" + urllib.parse.urlencode(q, safe=":")
         r = http_request("GET", url)
         if r["error"]:
             return None, "🌐 Gangguan jaringan: " + r["error"]
