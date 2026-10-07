@@ -79,6 +79,18 @@ dipolling tersimpan di `state.json` dan dilanjutkan setelah restart.
      layanan (API-nya mewajibkan negara untuk daftar layanan).
    - *Litensi & OTPCepat*: ada langkah pilih operator (mis. Telkomsel,
      Indosat, atau "Bebas/Acak" = termurah).
+
+## Ganti nomor (🔄)
+
+Tombol **🔄 Ganti Nomor** di kartu order aktif / 📦 Order Aktif menukar ke
+nomor lain dengan pilihan yang persis sama — tanpa mengulang wizard:
+
+- *Litensi*: jalur native `setStatus=3` (request another number); nomor
+  baru langsung keluar, order ID tetap.
+- *OTP Instan / NinjaOTP / OTPCepat*: order lama di-cancel (saldo
+  kembali), lalu bot otomatis order lagi dengan service/negara/operator
+  yang sama. Catatan: OTP Instan baru bisa cancel setelah order berumur
+  2 menit (aturan anti-abuse provider).
 3. Nomor HP + Order ID dikirim (nomor bisa diketuk untuk salin).
 4. Bot polling tiap 5 detik. Saat OTP masuk → kode dikirim **besar** +
    tombol **✅ Selesai** / **🔁 Minta Ulang** / **❌ Batalkan**.
