@@ -796,14 +796,19 @@ def do_order(chat_id, msg_id):
 
 # ---------------------------------------------------------------- aksi order aktif
 def send_otp_message(okey, rec, code):
+    # Litensi: "🔁 Minta Ulang" memanggil setStatus=3 (ganti nomor) — persis
+    # sama dengan tombol "🔄 Ganti Nomor", jadi disembunyikan untuk Litensi
+    # agar tidak ada dua tombol yang melakukan hal identik (fix 2026-10-07).
+    row1 = [btn("✅ Selesai", f"of:{okey}")]
+    if rec.get("provider") != "litensi":
+        row1.append(btn("🔁 Minta Ulang", f"ors:{okey}"))
     send_message(
         OWNER,
         f"🔑 <b>Kode OTP masuk!</b>\n\n<code>{esc(code)}</code>\n\n"
         f"<i>Ketuk kode untuk menyalin.</i>\n"
         f"Order: <code>{esc(rec['order_id'])}</code> • "
         f"{esc(rec.get('service_name') or '')}",
-        kb([[btn("✅ Selesai", f"of:{okey}"),
-             btn("🔁 Minta Ulang", f"ors:{okey}")],
+        kb([row1,
             [btn("❌ Batalkan", f"ocx:{okey}")]]))
     log.info("OTP diterima %s code=%s", okey, code)
 
