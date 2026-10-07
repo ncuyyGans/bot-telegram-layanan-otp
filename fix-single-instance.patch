@@ -1,0 +1,16 @@
+--- a/otpbot.py
++++ b/otpbot.py
+@@ -9,0 +10 @@
++import fcntl
+@@ -1407,0 +1409,11 @@
++    # Cegah dua instance berjalan bersamaan: Telegram menghentikan salah satu
++    # polling getUpdates (error 409) dan pesan/OTP bisa hilang ditelan instance
++    # lain. Lock dilepas otomatis saat proses mati. Pola sama seperti
++    # webping-bot (sudah live sejak awal) dan fix-single-instance-v2 bot GrabFood.
++    _lockf = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
++                               "otpbot.lock"), "w")
++    try:
++        fcntl.flock(_lockf, fcntl.LOCK_EX | fcntl.LOCK_NB)
++    except OSError:
++        print("another otpbot instance is already running; exiting", flush=True)
++        sys.exit(0)

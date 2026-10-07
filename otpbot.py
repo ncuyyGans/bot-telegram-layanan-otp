@@ -229,6 +229,9 @@ def load_state():
         orders = d.get("active_orders") or {}
         d["active_orders"] = {k: v for k, v in orders.items()
                               if v.get("timeout_at", 0) > now}
+        # bersihkan flag "changing" sisa crash saat tukar nomor
+        for v in d["active_orders"].values():
+            v.pop("changing", None)
         d.setdefault("provider", "litensi")
         d.setdefault("otpinstan_server", "s1")
         _state = d
@@ -769,6 +772,7 @@ def do_order(chat_id, msg_id):
         "service": w["service"],
         "service_name": w.get("service_name") or w["service"],
         "country": w.get("country"), "country_name": w.get("country_name"),
+        "operator": w.get("operator"), "operator_name": w.get("operator_name"),
         "created_at": now, "timeout_at": timeout_at,
         "last_code": None, "notified_no_code": False,
     })
@@ -784,8 +788,9 @@ def do_order(chat_id, msg_id):
         f"⏳ Bot memantau SMS masuk tiap {POLL_INTERVAL} detik. "
         f"Kode OTP langsung dikirim ke sini.\n"
         f"<i>Tempel nomor di atas ke aplikasi, lalu tunggu.</i>",
-        kb([[btn("❌ Batalkan Order", f"ocx:{okey}"),
-             btn("◀️ Menu", f"prov:{p}")]]))
+        kb([[btn("🔄 Ganti Nomor", f"och:{okey}"),
+             btn("❌ Batalkan Order", f"ocx:{okey}")],
+            [btn("◀️ Menu", f"prov:{p}")]]))
     log.info("order %s (%s) phone=%s", okey, p, d.get("phone"))
 
 
@@ -835,6 +840,164 @@ def do_resend(chat_id, okey):
                  "🔁 Permintaan SMS ulang dikirim, tunggu…"
                  if r["ok"] else f"❌ {r['error']}")
     log.info("resend %s ok=%s", okey, r["ok"])
+
+
+def _order_buttons(p, okey):
+    """Tombol standar kartu order aktif."""
+    return kb([[btn("🔄 Ganti Nomor", f"och:{okey}"),
+                btn("❌ Batalkan Order", f"ocx:{okey}")],
+               [btn("◀️ Menu", f"prov:{p}")]])
+
+
+def do_change_number(chat_id, okey, msg_id=None):
+    """Tombol 🔄 Ganti Nomor: tukar ke nomor lain dengan pilihan yang
+    persis sama — tanpa mengulang wizard.
+
+    - litensi: jalur native setStatus=3 (request another number); nomor
+      baru langsung keluar di respons, order_id tetap sama.
+    - otpinstan/ninjatop/otpcepat: cancel order lama (refund) -> order()
+      lagi dengan service/country/operator yang tersimpan.
+    """
+    rec = get_order(okey)
+    if not rec:
+        send_message(chat_id, "Order sudah tidak aktif.")
+        return
+    p = rec["provider"]
+    prov = get_provider(p)
+    if not prov:
+        send_message(chat_id, need_key_text(p))
+        return
+    if p == "otpinstan":
+        age = time.time() - rec.get("created_at", 0)
+        if age < OTPINSTAN_CANCEL_MIN:
+            wait = int(OTPINSTAN_CANCEL_MIN - age)
+            send_message(
+                chat_id,
+                f"⏳ Belum bisa ganti nomor — aturan anti-abuse OTP Instan: "
+                f"cancel setelah 2 menit.\nTunggu <b>{wait} detik</b> lagi, "
+                f"lalu tekan 🔄 Ganti Nomor lagi.")
+            return
+    # tandai agar poller tidak menyentuh order ini selama proses tukar
+    with _lock:
+        cur = _state["active_orders"].get(okey)
+        if cur:
+            cur["changing"] = True
+    save_state()
+    if msg_id:
+        edit_message(chat_id, msg_id,
+                     "🔄 <i>Menukar nomor… order lama dibatalkan, saldo kembali.</i>")
+    if p == "litensi":
+        _change_number_litensi(chat_id, okey, rec, prov, msg_id)
+    else:
+        _change_number_reorder(chat_id, okey, rec, prov, msg_id)
+
+
+def _change_number_litensi(chat_id, okey, rec, prov, msg_id):
+    p = rec["provider"]
+    r = prov.resend(rec["order_id"])  # setStatus=3 = minta nomor lain
+    new_phone = None
+    if r["ok"]:
+        raw = str((r["data"] or {}).get("raw") or "")
+        # respons sukses: ACCESS_NUMBER:<id>:<nomor_baru>
+        if raw.startswith("ACCESS_NUMBER:"):
+            parts = raw.split(":")
+            if len(parts) >= 3 and parts[2]:
+                new_phone = parts[2]
+    with _lock:
+        cur = _state["active_orders"].get(okey)
+        if cur:
+            cur.pop("changing", None)
+            if new_phone:
+                cur["phone"] = new_phone
+    save_state()
+    if r["ok"] and new_phone:
+        txt = (f"🔄 <b>Nomor berhasil diganti!</b>\n\n"
+               f"📱 Nomor baru: <code>{esc(new_phone)}</code>\n"
+               f"🆔 Order ID: <code>{esc(rec['order_id'])}</code> (tetap)\n"
+               f"Layanan: {esc(rec.get('service_name') or rec.get('service'))}\n\n"
+               f"<i>Nomor lama dibatalkan & saldonya kembali.</i>")
+        if msg_id:
+            edit_message(chat_id, msg_id, txt, _order_buttons(p, okey))
+        else:
+            send_message(chat_id, txt, _order_buttons(p, okey))
+    else:
+        err = r["error"] if not r["ok"] else \
+            "Respons nomor baru tak dikenal dari Litensi."
+        send_message(chat_id, f"❌ Gagal ganti nomor:\n{err}\n"
+                              f"Nomor lama masih aktif & terpantau.")
+    log.info("change_number litensi %s ok=%s new=%s",
+             okey, r["ok"], bool(new_phone))
+
+
+def _change_number_reorder(chat_id, okey, rec, prov, msg_id):
+    p = rec["provider"]
+    svc, cid, op = rec.get("service"), rec.get("country"), rec.get("operator")
+
+    def _fail_local(msg):
+        with _lock:
+            cur = _state["active_orders"].get(okey)
+            if cur:
+                cur.pop("changing", None)
+        save_state()
+        send_message(chat_id, msg)
+
+    rc = prov.cancel(rec["order_id"])
+    if not rc["ok"]:
+        _fail_local(f"❌ Gagal membatalkan order lama:\n{rc['error']}\n"
+                    f"Nomor tidak jadi diganti.")
+        log.info("change_number %s cancel gagal", okey)
+        return
+    # order baru dengan pilihan yang persis sama
+    if p == "otpcepat":
+        r = prov.order(svc, cid, operator=op or "random")
+    elif prov.has_countries:
+        r = prov.order(svc, cid)
+    else:
+        r = prov.order(svc)
+    if not r["ok"]:
+        # order lama sudah ter-cancel (refund); order baru gagal
+        with _lock:
+            _state["active_orders"].pop(okey, None)
+        save_state()
+        send_message(chat_id,
+                     f"🔄 Order lama dibatalkan (saldo kembali), tapi order "
+                     f"nomor baru gagal:\n{r['error']}\n"
+                     f"Silakan order manual dari menu.")
+        log.info("change_number %s reorder gagal", okey)
+        return
+    d = r["data"]
+    now = time.time()
+    timeout_at = now + ORDER_TIMEOUT
+    if p == "ninjatop":
+        exp = parse_expire(d.get("expire_at"))
+        if exp and exp > now:
+            timeout_at = exp
+    new_okey = f"{p}:{d['order_id']}"
+    with _lock:
+        _state["active_orders"].pop(okey, None)
+        _state["active_orders"][new_okey] = {
+            "provider": p, "order_id": str(d["order_id"]),
+            "phone": str(d.get("phone") or ""),
+            "service": svc,
+            "service_name": rec.get("service_name") or svc,
+            "country": cid, "country_name": rec.get("country_name"),
+            "operator": op, "operator_name": rec.get("operator_name"),
+            "created_at": now, "timeout_at": timeout_at,
+            "last_code": None, "notified_no_code": False,
+        }
+    save_state()
+    txt = (f"🔄 <b>Nomor berhasil diganti!</b>\n\n"
+           f"📱 Nomor baru: <code>{esc(d.get('phone'))}</code>\n"
+           f"🆔 Order ID baru: <code>{esc(d.get('order_id'))}</code>\n"
+           f"Layanan: {esc(rec.get('service_name') or svc)}\n\n"
+           f"<i>Order lama dibatalkan & saldonya kembali. "
+           f"Bot lanjut memantau nomor baru.</i>")
+    if msg_id:
+        edit_message(chat_id, msg_id, txt, _order_buttons(p, new_okey))
+    else:
+        send_message(chat_id, txt, _order_buttons(p, new_okey))
+    log.info("change_number %s -> %s phone=%s", okey, new_okey,
+             d.get("phone"))
 
 
 def do_cancel(chat_id, okey, via_edit=True, msg_id=None):
@@ -888,6 +1051,7 @@ def show_active(chat_id, msg_id, p, edit=True):
                 f"({esc(rec.get('service_name') or rec.get('service'))}) — "
                 f"<code>{esc(rec['order_id'])}</code>, {age} mnt")
             rows.append([btn(f"🔑 Cek {rec['order_id'][-8:]}", f"ock:{okey}"),
+                         btn("🔄 Ganti", f"och:{okey}"),
                          btn("❌ Batal", f"ocx:{okey}")])
         rows.append([btn("◀️ Kembali", f"prov:{p}")])
         txt = "\n".join(lines)
@@ -942,6 +1106,8 @@ def poll_tick():
     now = time.time()
     for okey, rec in snapshot:
         try:
+            if rec.get("changing"):
+                continue  # sedang ditukar nomornya, jangan disentuh
             if now > rec.get("timeout_at", 0):
                 remove_order(okey)
                 send_message(
@@ -1379,7 +1545,7 @@ def handle_callback(q):
             edit_message(chat_id, msg_id, "❌ Order dibatalkan.",
                          kb([[btn("◀️ Menu", "menu")]]))
         # -- aksi order aktif --
-        elif cmd in ("of", "ors", "ocx", "ock"):
+        elif cmd in ("of", "ors", "ocx", "ock", "och"):
             okey = ":".join(parts[1:])
             if cmd == "of":
                 do_finish(chat_id, okey, via_edit=True, msg_id=msg_id)
@@ -1389,6 +1555,8 @@ def handle_callback(q):
                 do_cancel(chat_id, okey, via_edit=True, msg_id=msg_id)
             elif cmd == "ock":
                 manual_check(chat_id, okey)
+            elif cmd == "och":
+                do_change_number(chat_id, okey, msg_id=msg_id)
         else:
             log.warning("callback tak dikenal: %s", data)
     except Exception:
