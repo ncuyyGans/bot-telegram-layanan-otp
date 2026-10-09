@@ -28,7 +28,7 @@ ENV_KEYS = {
     "otpinstan": "OTPINSTAN_API_KEY",
     "ninjatop": "NINJATOP_API_KEY",
     "otpcepat": "OTPCEPAT_API_KEY",
-    "dehuy": "DEHUY_API_KEY",
+    # "dehuy": "DEHUY_API_KEY",  # diarsipkan 2026-10-09
 }
 # nama konektor Secure Vault (fallback terakhir, khusus lingkungan Muse)
 # custom.telegram_otp dipakai, bukan custom.telegram, karena yang terakhir
@@ -39,7 +39,7 @@ VAULT_CONNECTORS = {
     "otpinstan": "custom.otpinstan",
     "ninjatop": "custom.ninjatop",
     "otpcepat": "custom.otpcepat",
-    "dehuy": "custom.dehuy",
+    # "dehuy": "custom.dehuy",  # diarsipkan 2026-10-09
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -298,7 +298,7 @@ def parse_expire(expire_at):
 def _order_timeout(p, d, now):
     """timeout_at order: pakai expires_at provider bila valid,
     fallback ke ORDER_TIMEOUT (20 menit)."""
-    if p in ("ninjatop", "dehuy"):
+    if p == "ninjatop":
         exp = parse_expire(d.get("expires_at"))
         if exp and exp > now:
             return exp
@@ -833,13 +833,8 @@ def send_otp_message(okey, rec, code):
     # Litensi: "🔁 Minta Ulang" memanggil setStatus=3 (ganti nomor) — persis
     # sama dengan tombol "🔄 Ganti Nomor", jadi disembunyikan untuk Litensi
     # agar tidak ada dua tombol yang melakukan hal identik (fix 2026-10-07).
-    # DehuyOTPWA: layanan dengan allow_retry=False adalah sekali-pakai —
-    # API menolak retry (409), jadi tombolnya disembunyikan juga.
     row1 = [btn("✅ Selesai", f"of:{okey}")]
-    show_resend = rec.get("provider") != "litensi"
-    if rec.get("provider") == "dehuy" and rec.get("allow_retry") is False:
-        show_resend = False
-    if show_resend:
+    if rec.get("provider") != "litensi":
         row1.append(btn("🔁 Minta Ulang", f"ors:{okey}"))
     send_message(
         OWNER,
@@ -1216,7 +1211,7 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 /batal &lt;order_id&gt; — batalkan order aktif
 /server — ganti server OTP Instan (s1..s5)
 /setkey &lt;provider&gt; — simpan API key
-<i>provider: litensi|otpinstan|ninjatop|otpcepat|dehuy</i>
+<i>provider: litensi|otpinstan|ninjatop|otpcepat</i>
 /bantuan — pesan ini
 
 <b>Alur order:</b> pilih layanan → konfirmasi harga →
