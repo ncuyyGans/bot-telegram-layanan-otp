@@ -14,6 +14,7 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 | **OTP Instan** | Header `X-Api-Key` | Otomatis Indonesia | 5 server (s1–s5), bisa ganti via /server atau menu ⚙️ |
 | **NinjaOTP** | Header `Authorization: Bearer nk_xxxx` | — (tanpa konsep negara) | Harga+stok langsung per layanan |
 | **OTPCepat** | `api_key` di query | Otomatis Indonesia ("Wakanda (Indo)") | 46 negara; status Waiting SMS/Recieved/Cancel/Done |
+| **DehuyOTPWA** | Header `Authorization: Bearer wh_live_…` | — (tanpa konsep negara) | Pay-per-Success (saldo terpotong hanya bila OTP masuk); Re-OTP gratis bila layanan mendukung (maks 5x); tombol 🔁 disembunyikan untuk layanan sekali-pakai |
 
 ## Cara pakai
 

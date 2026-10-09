@@ -28,6 +28,7 @@ ENV_KEYS = {
     "otpinstan": "OTPINSTAN_API_KEY",
     "ninjatop": "NINJATOP_API_KEY",
     "otpcepat": "OTPCEPAT_API_KEY",
+    "dehuy": "DEHUY_API_KEY",
 }
 # nama konektor Secure Vault (fallback terakhir, khusus lingkungan Muse)
 # custom.telegram_otp dipakai, bukan custom.telegram, karena yang terakhir
@@ -38,6 +39,7 @@ VAULT_CONNECTORS = {
     "otpinstan": "custom.otpinstan",
     "ninjatop": "custom.ninjatop",
     "otpcepat": "custom.otpcepat",
+    "dehuy": "custom.dehuy",
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -291,6 +293,16 @@ def parse_expire(expire_at):
         return int(dt.timestamp())
     except (ValueError, TypeError):
         return None
+
+
+def _order_timeout(p, d, now):
+    """timeout_at order: pakai expires_at provider bila valid,
+    fallback ke ORDER_TIMEOUT (20 menit)."""
+    if p in ("ninjatop", "dehuy"):
+        exp = parse_expire(d.get("expires_at"))
+        if exp and exp > now:
+            return exp
+    return now + ORDER_TIMEOUT
 
 
 # ---------------------------------------------------------------- menu & wizard
@@ -783,11 +795,7 @@ def do_order(chat_id, msg_id):
         return
     d = r["data"]
     now = time.time()
-    timeout_at = now + ORDER_TIMEOUT
-    if p == "ninjatop":
-        exp = parse_expire(d.get("expire_at"))
-        if exp and exp > now:
-            timeout_at = exp
+    timeout_at = _order_timeout(p, d, now)
     okey = f"{p}:{d['order_id']}"
     add_order(okey, {
         "provider": p, "order_id": str(d["order_id"]),
@@ -798,6 +806,9 @@ def do_order(chat_id, msg_id):
         "operator": w.get("operator"), "operator_name": w.get("operator_name"),
         "created_at": now, "timeout_at": timeout_at,
         "last_code": None, "notified_no_code": False,
+        # khusus provider tertentu (mis. DehuyOTPWA): token sewa &
+        # flag allow_retry untuk tombol "🔁 Minta Ulang".
+        "token": d.get("token"), "allow_retry": d.get("allow_retry"),
     })
     _wiz.pop(chat_id, None)
     price_note = f"\nHarga: {rupiah(w['price'])}" if w.get("price") else ""
@@ -822,8 +833,13 @@ def send_otp_message(okey, rec, code):
     # Litensi: "🔁 Minta Ulang" memanggil setStatus=3 (ganti nomor) — persis
     # sama dengan tombol "🔄 Ganti Nomor", jadi disembunyikan untuk Litensi
     # agar tidak ada dua tombol yang melakukan hal identik (fix 2026-10-07).
+    # DehuyOTPWA: layanan dengan allow_retry=False adalah sekali-pakai —
+    # API menolak retry (409), jadi tombolnya disembunyikan juga.
     row1 = [btn("✅ Selesai", f"of:{okey}")]
-    if rec.get("provider") != "litensi":
+    show_resend = rec.get("provider") != "litensi"
+    if rec.get("provider") == "dehuy" and rec.get("allow_retry") is False:
+        show_resend = False
+    if show_resend:
         row1.append(btn("🔁 Minta Ulang", f"ors:{okey}"))
     send_message(
         OWNER,
@@ -995,11 +1011,7 @@ def _change_number_reorder(chat_id, okey, rec, prov, msg_id):
         return
     d = r["data"]
     now = time.time()
-    timeout_at = now + ORDER_TIMEOUT
-    if p == "ninjatop":
-        exp = parse_expire(d.get("expire_at"))
-        if exp and exp > now:
-            timeout_at = exp
+    timeout_at = _order_timeout(p, d, now)
     new_okey = f"{p}:{d['order_id']}"
     with _lock:
         _state["active_orders"].pop(okey, None)
@@ -1012,6 +1024,7 @@ def _change_number_reorder(chat_id, okey, rec, prov, msg_id):
             "operator": op, "operator_name": rec.get("operator_name"),
             "created_at": now, "timeout_at": timeout_at,
             "last_code": None, "notified_no_code": False,
+            "token": d.get("token"), "allow_retry": d.get("allow_retry"),
         }
     save_state()
     txt = (f"🔄 <b>Nomor berhasil diganti!</b>\n\n"
@@ -1203,7 +1216,7 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 /batal &lt;order_id&gt; — batalkan order aktif
 /server — ganti server OTP Instan (s1..s5)
 /setkey &lt;provider&gt; — simpan API key
-<i>provider: litensi|otpinstan|ninjatop|otpcepat</i>
+<i>provider: litensi|otpinstan|ninjatop|otpcepat|dehuy</i>
 /bantuan — pesan ini
 
 <b>Alur order:</b> pilih layanan → konfirmasi harga →
@@ -1402,13 +1415,14 @@ def _resolve_indonesia(p):
     Dipakai agar langkah "pilih negara" otomatis terisi Indonesia —
     user langsung ke pilih layanan. Return (cid, name, error);
     error None bila sukses. Untuk provider tanpa konsep negara
-    (NinjaOTP) mengembalikan (None, None, None).
+    (NinjaOTP, DehuyOTPWA) mengembalikan (None, None, None).
     """
+    cls = PROVIDER_CLASSES.get(p)
+    if cls and not cls.has_countries:
+        return None, None, None
     prov = get_provider(p)
     if not prov:
         return None, None, need_key_text(p)
-    if not prov.has_countries:
-        return None, None, None
     keys = getattr(prov, "INDONESIA_KEYS", ("indonesia",))
     r = prov.get_countries()
     if not r["ok"]:
