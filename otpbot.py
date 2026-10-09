@@ -7,6 +7,7 @@ order nomor -> bot polling OTP otomatis tiap 5 detik.
 Hanya melayani OWNER_CHAT_ID; chat lain diabaikan diam-diam.
 Stdlib only. Jalankan:  python3 otpbot.py
 """
+import fcntl
 import html
 import json
 import logging
@@ -1692,6 +1693,17 @@ def handle_update(u):
 # ---------------------------------------------------------------- main
 def main():
     global TOKEN, OWNER
+    # Pengaman single-instance (pola sama seperti webping-bot): kalau ada
+    # instance lain yang masih jalan, keluar diam-diam. Mencegah error 409
+    # Telegram ("terminated by other getUpdates request") saat dua instance
+    # polling bersamaan. Lock dilepas otomatis saat proses mati.
+    _lock_fh = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 "otpbot.lock"), "w")
+    try:
+        fcntl.flock(_lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("Instance otpbot lain sedang berjalan, keluar.", flush=True)
+        sys.exit(0)
     TOKEN = get_token()
     OWNER = get_owner()
     if not TOKEN:

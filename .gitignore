@@ -2,5 +2,6 @@
 secrets.json
 state.json
 bot.log
+otpbot.lock
 __pycache__/
 *.pyc
