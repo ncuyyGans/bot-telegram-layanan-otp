@@ -388,9 +388,13 @@ def do_services(chat_id, msg_id, p):
         edit_message(chat_id, msg_id, need_key_text(p),
                      kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
-    if p in ("otpinstan", "otpcepat"):
-        # services.php kedua provider ini wajib pakai country —
-        # otomatis Indonesia, langkah pilih negara dilewati.
+    if p == "otpinstan":
+        # OTP Instan: pilih negara manual (Indonesia disematkan paling atas).
+        cf_countries_page(chat_id, msg_id, 0, p, edit=True, mode="list")
+        return
+    if p == "otpcepat":
+        # services.php OTPCepat wajib pakai country —
+        # otomatis Indonesia ("Wakanda (Indo)"), langkah pilih dilewati.
         cid, cname, err = _resolve_indonesia(p)
         if err or not cid:
             edit_message(chat_id, msg_id,
@@ -560,7 +564,10 @@ def start_order(chat_id, p):
     _wiz[chat_id] = {"p": p, "service": None, "service_name": None,
                      "country": None, "country_name": None,
                      "operator": None, "price": None}
-    if p in ("otpinstan", "otpcepat"):
+    if p == "otpinstan":
+        # OTP Instan: pilih negara manual (Indonesia disematkan paling atas).
+        wiz_oi_countries(chat_id, None, 0, edit=False)
+    elif p == "otpcepat":
         # Negara otomatis: Indonesia ("Wakanda (Indo)" di OTPCepat) —
         # langkah pilih negara dilewati, langsung ke pilih layanan.
         cid, cname, err = _resolve_indonesia(p)
@@ -604,7 +611,8 @@ def cf_countries_page(chat_id, msg_id, pg, p, edit=True, mode="order"):
     else:
         head = f"🛒 <b>Order — {esc(title)}</b>"
         cancel = [[btn("❌ Batal", "wx")]]
-    ctys = r["data"]["countries"]
+    # Indonesia disematkan paling atas agar gampang dipilih.
+    ctys = _pin_indonesia_first(prov, r["data"]["countries"])
     total = len(ctys)
     pg = max(0, min(pg, (total - 1) // PAGE if total else 0))
     chunk = ctys[pg * PAGE:(pg + 1) * PAGE]
@@ -1217,8 +1225,9 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 <b>Alur order:</b> pilih layanan → konfirmasi harga →
 nomor keluar → bot memantau SMS tiap 5 detik → kode OTP dikirim otomatis.
 
-🌏 Negara otomatis <b>Indonesia</b> di semua provider — langkah pilih
-negara dilewati (di OTPCepat namanya "Wakanda (Indo)").
+🌏 Negara otomatis <b>Indonesia</b> untuk Litensi & OTPCepat —
+langkah pilih negara dilewati (di OTPCepat namanya "Wakanda (Indo)").
+OTP Instan pilih negara manual — Indonesia disematkan paling atas.
 
 <i>Tips: di daftar layanan ada tombol 🔍 Cari — ketik saja namanya,
 nggak perlu geser-geser halaman.</i>
@@ -1257,9 +1266,13 @@ def cmd_services(chat_id, p):
     if not prov:
         send_message(chat_id, need_key_text(p))
         return
-    if p in ("otpinstan", "otpcepat"):
-        # daftar layanan kedua provider ini wajib pakai negara —
-        # otomatis Indonesia, langkah pilih negara dilewati.
+    if p == "otpinstan":
+        # OTP Instan: pilih negara manual (Indonesia disematkan paling atas).
+        cf_countries_page(chat_id, None, 0, p, edit=False, mode="list")
+        return
+    if p == "otpcepat":
+        # daftar layanan OTPCepat wajib pakai negara —
+        # otomatis Indonesia ("Wakanda (Indo)"), langkah pilih dilewati.
         cid, cname, err = _resolve_indonesia(p)
         if err or not cid:
             send_message(chat_id, f"❌ {err or 'Gagal menemukan Indonesia.'}")
@@ -1418,23 +1431,42 @@ def _resolve_indonesia(p):
     prov = get_provider(p)
     if not prov:
         return None, None, need_key_text(p)
-    keys = getattr(prov, "INDONESIA_KEYS", ("indonesia",))
     r = prov.get_countries()
     if not r["ok"]:
         return None, None, r["error"]
+    c = _find_indonesia_entry(prov, r["data"]["countries"])
+    if not c:
+        return None, None, (f"Daftar negara {PROVIDER_TITLES.get(p, p)} "
+                            "tidak memuat Indonesia.")
+    return str(c["id"]), str(c.get("name") or c["id"]), None
+
+
+def _find_indonesia_entry(prov, countries):
+    """Cari dict negara Indonesia di daftar get_countries().
+
+    Cocok persis didahulukan, lalu cocok sebagian (prioritas sesuai
+    INDONESIA_KEYS provider). Return dict-nya atau None.
+    """
+    keys = getattr(prov, "INDONESIA_KEYS", ("indonesia",))
     best = None
-    for c in r["data"]["countries"]:
+    for c in countries:
         name = str(c.get("name") or "")
         nl = name.lower()
         for kw in keys:
             if nl == kw:
-                return str(c["id"]), name, None
+                return c
             if kw in nl and best is None:
-                best = (str(c["id"]), name)
-    if best:
-        return best[0], best[1], None
-    return None, None, (f"Daftar negara {PROVIDER_TITLES.get(p, p)} "
-                        "tidak memuat Indonesia.")
+                best = c
+    return best
+
+
+def _pin_indonesia_first(prov, countries):
+    """Pindahkan Indonesia ke urutan paling atas daftar negara
+    (dipakai halaman pilih negara OTP Instan)."""
+    indo = _find_indonesia_entry(prov, countries)
+    if not indo:
+        return countries
+    return [indo] + [c for c in countries if c is not indo]
 
 
 def handle_callback(q):

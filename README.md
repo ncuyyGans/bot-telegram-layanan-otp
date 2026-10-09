@@ -11,7 +11,7 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 | Provider | Auth | Negara | Catatan |
 |---|---|---|---|
 | **Litensi** | `api_key` di query | Otomatis Indonesia | API gaya sms-activate; bisa pilih operator (Telkomsel/dll) |
-| **OTP Instan** | Header `X-Api-Key` | Otomatis Indonesia | 5 server (s1–s5), bisa ganti via /server atau menu ⚙️ |
+| **OTP Instan** | Header `X-Api-Key` | Manual (Indonesia paling atas) | 5 server (s1–s5), bisa ganti via /server atau menu ⚙️ |
 | **NinjaOTPWA** | Header `Authorization: Bearer nk_xxxx` | — (tanpa konsep negara) | Harga+stok langsung per layanan |
 | **OTPCepat** | `api_key` di query | Otomatis Indonesia ("Wakanda (Indo)") | 46 negara; status Waiting SMS/Recieved/Cancel/Done |
 
@@ -79,10 +79,12 @@ dipolling tersimpan di `state.json` dan dilanjutkan setelah restart.
 
 1. `/order` → pilih layanan (tombol, ada halaman bila banyak; ada tombol
    **🔍 Cari** — ketik nama layanan di chat, tidak perlu geser halaman).
-2. Tampil harga termurah + stok → ✅ Order. Negara **otomatis Indonesia**
-   di semua provider — langkah pilih negara dilewati.
-   - *OTPCepat*: Indonesia bernama **"Wakanda (Indo)"** di API-nya
-     (country_id=6); bot memetakannya otomatis.
+2. Tampil harga termurah + stok → ✅ Order.
+   - *Litensi & OTPCepat*: negara **otomatis Indonesia** — langkah pilih
+     negara dilewati. *OTPCepat*: Indonesia bernama **"Wakanda (Indo)"**
+     di API-nya (country_id=6); bot memetakannya otomatis.
+   - *OTP Instan*: pilih negara manual — **Indonesia disematkan paling
+     atas** daftar negara.
    - *Litensi & OTPCepat*: ada langkah pilih operator (mis. Telkomsel,
      Indosat, atau "Bebas/Acak" = termurah).
 
