@@ -17,6 +17,10 @@ class OTPCepatProvider(OTPProvider):
     name = "otpcepat"
     title = "OTPCepat"
 
+    # Di OTPCepat, Indonesia TIDAK bernama "Indonesia" — namanya
+    # "Wakanda (Indo)" (terverifikasi live 2026-10-09, country_id=6).
+    INDONESIA_KEYS = ("wakanda (indo)", "wakanda", "indonesia")
+
     ERROR_MAP = {
         "You don't have Access!": "🔑 API key salah / tidak punya akses — cek lagi dengan /setkey otpcepat.",
         "BAD ACTION": "Action API tidak dikenal (bug konektor?).",

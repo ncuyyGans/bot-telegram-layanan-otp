@@ -74,6 +74,12 @@ class OTPProvider:
     # False untuk provider yang tidak punya konsep negara (mis. NinjaOTP):
     # bot akan melewati langkah "pilih negara" di wizard order.
     has_countries = True
+    # Kata kunci untuk menemukan Indonesia di daftar negara provider
+    # (dipakai bot agar langkah "pilih negara" otomatis terisi).
+    # Urutan = prioritas; cocok persis didahulukan, lalu cocok sebagian.
+    # Provider yang menamai Indonesia secara nyeleneh menimpa ini
+    # (mis. OTPCepat: "Wakanda (Indo)").
+    INDONESIA_KEYS = ("indonesia",)
 
     def __init__(self, api_key):
         self.api_key = api_key

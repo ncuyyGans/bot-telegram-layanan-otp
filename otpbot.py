@@ -349,6 +349,27 @@ def do_balance(chat_id, msg_id, p):
                  kb([[btn("◀️ Kembali", f"prov:{p}")]]))
 
 
+def _services_lines(p, svcs, cname=None):
+    """Baris-baris daftar layanan (maks 60 + catatan sisa)."""
+    title = PROVIDER_TITLES.get(p, p)
+    head = f"📋 <b>Layanan {esc(title)}"
+    if cname:
+        head += f" — {esc(cname)}"
+    head += f"</b> ({len(svcs)})"
+    lines = [head]
+    for s in svcs[:60]:
+        extra = ""
+        if s.get("price") is not None:
+            extra = f" — {rupiah(s['price'])}"
+            if s.get("stock") is not None:
+                extra += f" (stok {s['stock']})"
+        lines.append(f"• {esc(s['name'])} <code>{esc(s['code'])}</code>{extra}")
+    if len(svcs) > 60:
+        lines.append(f"<i>…dan {len(svcs) - 60} lainnya, pakai /order "
+                     f"untuk pilih via tombol.</i>")
+    return lines
+
+
 def do_services(chat_id, msg_id, p):
     prov = get_provider(p)
     if not prov:
@@ -356,8 +377,15 @@ def do_services(chat_id, msg_id, p):
                      kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
     if p in ("otpinstan", "otpcepat"):
-        # services.php kedua provider ini wajib pakai country -> pilih dulu
-        cf_countries_page(chat_id, msg_id, 0, p, edit=True, mode="list")
+        # services.php kedua provider ini wajib pakai country —
+        # otomatis Indonesia, langkah pilih negara dilewati.
+        cid, cname, err = _resolve_indonesia(p)
+        if err or not cid:
+            edit_message(chat_id, msg_id,
+                         f"❌ {err or 'Gagal menemukan Indonesia.'}",
+                         kb([[btn("◀️ Kembali", f"prov:{p}")]]))
+            return
+        cf_show_services(chat_id, msg_id, p, cid)
         return
     r = prov.get_services()
     title = PROVIDER_TITLES.get(p, p)
@@ -367,17 +395,7 @@ def do_services(chat_id, msg_id, p):
                      kb([[btn("◀️ Kembali", f"prov:{p}")]]))
         return
     svcs = r["data"]["services"]
-    lines = [f"📋 <b>Layanan {esc(title)}</b> ({len(svcs)})"]
-    for s in svcs[:60]:
-        extra = ""
-        if s.get("price") is not None:
-            extra = f" — {rupiah(s['price'])}"
-            if s.get("stock") is not None:
-                extra += f" (stok {s['stock']})"
-        lines.append(f"• {esc(s['name'])} <code>{esc(s['code'])}</code>{extra}")
-    if len(svcs) > 60:
-        lines.append(f"<i>…dan {len(svcs) - 60} lainnya, pakai /order untuk pilih via tombol.</i>")
-    edit_message(chat_id, msg_id, "\n".join(lines),
+    edit_message(chat_id, msg_id, "\n".join(_services_lines(p, svcs)),
                  kb([[btn("🛒 Order Nomor", f"ord:{p}"),
                       btn("◀️ Kembali", f"prov:{p}")]]))
 
@@ -530,11 +548,17 @@ def start_order(chat_id, p):
     _wiz[chat_id] = {"p": p, "service": None, "service_name": None,
                      "country": None, "country_name": None,
                      "operator": None, "price": None}
-    if p == "otpinstan":
-        wiz_oi_countries(chat_id, None, 0, edit=False)
-    elif p == "otpcepat":
-        cf_countries_page(chat_id, None, 0, "otpcepat", edit=False,
-                          mode="order")
+    if p in ("otpinstan", "otpcepat"):
+        # Negara otomatis: Indonesia ("Wakanda (Indo)" di OTPCepat) —
+        # langkah pilih negara dilewati, langsung ke pilih layanan.
+        cid, cname, err = _resolve_indonesia(p)
+        if err or not cid:
+            _wiz.pop(chat_id, None)
+            send_message(chat_id,
+                         f"❌ {err or 'Gagal menemukan Indonesia.'}")
+            return
+        _wiz[chat_id].update({"country": cid, "country_name": cname})
+        cf_services_page(chat_id, None, p, cid, 0, edit=False)
     else:
         wiz_services_page(chat_id, None, p, 0, edit=False)
 
@@ -608,17 +632,7 @@ def cf_show_services(chat_id, msg_id, p, cid):
         return
     svcs = r["data"]["services"]
     cname = _cty_name(prov, cid)
-    lines = [f"📋 <b>Layanan {esc(title)} — {esc(cname)}</b> ({len(svcs)})"]
-    for s in svcs[:60]:
-        extra = ""
-        if s.get("price") is not None:
-            extra = f" — {rupiah(s['price'])}"
-            if s.get("stock") is not None:
-                extra += f" (stok {s['stock']})"
-        lines.append(f"• {esc(s['name'])} <code>{esc(s['code'])}</code>{extra}")
-    if len(svcs) > 60:
-        lines.append(f"<i>…dan {len(svcs) - 60} lainnya.</i>")
-    edit_message(chat_id, msg_id, "\n".join(lines),
+    edit_message(chat_id, msg_id, "\n".join(_services_lines(p, svcs, cname)),
                  kb([[btn("🛒 Order Nomor", f"ord:{p}"),
                       btn("◀️ Kembali", f"prov:{p}")]]))
 
@@ -634,20 +648,27 @@ CF_SVC_PREFIXES = {
 }
 
 
-def cf_services_page(chat_id, msg_id, p, cid, pg):
+def cf_services_page(chat_id, msg_id, p, cid, pg, edit=True):
     """Pilih layanan satu negara (country-first, mode order)."""
     prov = get_provider(p)
     r = prov.get_services(cid) if prov else {"ok": False}
     if not r["ok"]:
-        edit_message(chat_id, msg_id,
-                     f"❌ {r.get('error', 'gagal ambil layanan')}",
-                     kb([[btn("◀️ Kembali", f"prov:{p}")]]))
+        txt = (f"❌ {r.get('error', 'gagal ambil layanan')}")
+        rows = kb([[btn("◀️ Kembali", f"prov:{p}")]])
+        if edit:
+            edit_message(chat_id, msg_id, txt, rows)
+        else:
+            send_message(chat_id, txt, rows)
         return
     svcs = r["data"]["services"]
     total = len(svcs)
     if not total:
-        edit_message(chat_id, msg_id, "📵 Tidak ada layanan di negara ini.",
-                     kb([[btn("◀️ Kembali", f"prov:{p}")]]))
+        txt = "📵 Tidak ada layanan di negara ini."
+        rows = kb([[btn("◀️ Kembali", f"prov:{p}")]])
+        if edit:
+            edit_message(chat_id, msg_id, txt, rows)
+        else:
+            send_message(chat_id, txt, rows)
         return
     sel_cb, page_cb = CF_SVC_PREFIXES[p]
     pg = max(0, min(pg, (total - 1) // PAGE))
@@ -663,13 +684,15 @@ def cf_services_page(chat_id, msg_id, p, cid, pg):
         rows.append(nav)
     rows.append([btn("🔍 Cari layanan", "wfind")])
     rows.append([btn("❌ Batal", "wx")])
-    edit_message(chat_id, msg_id,
-                 f"Pilih layanan (hal. {pg + 1}/{(total + PAGE - 1) // PAGE}):",
-                 kb(rows))
+    txt = (f"Pilih layanan (hal. {pg + 1}/{(total + PAGE - 1) // PAGE}):")
+    if edit:
+        edit_message(chat_id, msg_id, txt, kb(rows))
+    else:
+        send_message(chat_id, txt, kb(rows))
 
 
-def wiz_oi_services(chat_id, msg_id, cid, pg):
-    cf_services_page(chat_id, msg_id, "otpinstan", cid, pg)
+def wiz_oi_services(chat_id, msg_id, cid, pg, edit=True):
+    cf_services_page(chat_id, msg_id, "otpinstan", cid, pg, edit=edit)
 
 
 def do_search(chat_id, msg_id, query):
@@ -1183,8 +1206,11 @@ HELP_TEXT = """🤖 <b>OTP Bot — bantuan</b>
 <i>provider: litensi|otpinstan|ninjatop|otpcepat</i>
 /bantuan — pesan ini
 
-<b>Alur order:</b> pilih layanan → (pilih negara) → konfirmasi harga →
+<b>Alur order:</b> pilih layanan → konfirmasi harga →
 nomor keluar → bot memantau SMS tiap 5 detik → kode OTP dikirim otomatis.
+
+🌏 Negara otomatis <b>Indonesia</b> di semua provider — langkah pilih
+negara dilewati (di OTPCepat namanya "Wakanda (Indo)").
 
 <i>Tips: di daftar layanan ada tombol 🔍 Cari — ketik saja namanya,
 nggak perlu geser-geser halaman.</i>
@@ -1224,25 +1250,26 @@ def cmd_services(chat_id, p):
         send_message(chat_id, need_key_text(p))
         return
     if p in ("otpinstan", "otpcepat"):
-        # daftar layanan kedua provider ini wajib pakai negara
-        cf_countries_page(chat_id, None, 0, p, edit=False, mode="list")
+        # daftar layanan kedua provider ini wajib pakai negara —
+        # otomatis Indonesia, langkah pilih negara dilewati.
+        cid, cname, err = _resolve_indonesia(p)
+        if err or not cid:
+            send_message(chat_id, f"❌ {err or 'Gagal menemukan Indonesia.'}")
+            return
+        r = prov.get_services(cid)
+        if not r["ok"]:
+            send_message(chat_id, f"❌ {r['error']}")
+            return
+        svcs = r["data"]["services"]
+        send_message(chat_id, "\n".join(_services_lines(p, svcs, cname)),
+                     kb([[btn("🛒 Order", f"ord:{p}")]]))
         return
     r = prov.get_services()
     if not r["ok"]:
         send_message(chat_id, f"❌ {r['error']}")
         return
     svcs = r["data"]["services"]
-    lines = [f"📋 <b>Layanan {esc(PROVIDER_TITLES[p])}</b> ({len(svcs)})"]
-    for s in svcs[:60]:
-        extra = ""
-        if s.get("price") is not None:
-            extra = f" — {rupiah(s['price'])}"
-            if s.get("stock") is not None:
-                extra += f" (stok {s['stock']})"
-        lines.append(f"• {esc(s['name'])} <code>{esc(s['code'])}</code>{extra}")
-    if len(svcs) > 60:
-        lines.append(f"<i>…{len(svcs) - 60} lainnya.</i>")
-    send_message(chat_id, "\n".join(lines),
+    send_message(chat_id, "\n".join(_services_lines(p, svcs)),
                  kb([[btn("🛒 Order", f"ord:{p}")]]))
 
 
@@ -1369,6 +1396,38 @@ def _cty_name(prov, cid):
     return cid
 
 
+def _resolve_indonesia(p):
+    """Cari (country_id, country_name) Indonesia di provider p.
+
+    Dipakai agar langkah "pilih negara" otomatis terisi Indonesia —
+    user langsung ke pilih layanan. Return (cid, name, error);
+    error None bila sukses. Untuk provider tanpa konsep negara
+    (NinjaOTP) mengembalikan (None, None, None).
+    """
+    prov = get_provider(p)
+    if not prov:
+        return None, None, need_key_text(p)
+    if not prov.has_countries:
+        return None, None, None
+    keys = getattr(prov, "INDONESIA_KEYS", ("indonesia",))
+    r = prov.get_countries()
+    if not r["ok"]:
+        return None, None, r["error"]
+    best = None
+    for c in r["data"]["countries"]:
+        name = str(c.get("name") or "")
+        nl = name.lower()
+        for kw in keys:
+            if nl == kw:
+                return str(c["id"]), name, None
+            if kw in nl and best is None:
+                best = (str(c["id"]), name)
+    if best:
+        return best[0], best[1], None
+    return None, None, (f"Daftar negara {PROVIDER_TITLES.get(p, p)} "
+                        "tidak memuat Indonesia.")
+
+
 def handle_callback(q):
     cb_id = q["id"]
     msg = q.get("message") or {}
@@ -1436,7 +1495,21 @@ def handle_callback(q):
                       "country": None, "country_name": None,
                       "operator": None})
             if prov.has_countries:
-                wiz_countries_page(chat_id, msg_id, p, code, 0)
+                # Negara otomatis: Indonesia — langkah pilih negara
+                # dilewati, langsung ke pilih operator (Litensi).
+                cid, cname, err = _resolve_indonesia(p)
+                if err or not cid:
+                    edit_message(
+                        chat_id, msg_id,
+                        f"❌ {err or 'Gagal menemukan Indonesia.'}",
+                        kb([[btn("◀️ Kembali", f"prov:{p}")]]))
+                else:
+                    w.update({"country": cid, "country_name": cname})
+                    if p == "litensi":
+                        wiz_operators_page(chat_id, msg_id, p,
+                                           w["service_name"] or code, cid)
+                    else:
+                        wiz_confirm(chat_id, msg_id, w)
             else:
                 wiz_confirm(chat_id, msg_id, w)
         elif cmd == "wcp":
