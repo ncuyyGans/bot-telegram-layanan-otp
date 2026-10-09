@@ -12,7 +12,7 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 |---|---|---|---|
 | **Litensi** | `api_key` di query | Otomatis Indonesia | API gaya sms-activate; bisa pilih operator (Telkomsel/dll) |
 | **OTP Instan** | Header `X-Api-Key` | Otomatis Indonesia | 5 server (s1–s5), bisa ganti via /server atau menu ⚙️ |
-| **NinjaOTP** | Header `Authorization: Bearer nk_xxxx` | — (tanpa konsep negara) | Harga+stok langsung per layanan |
+| **NinjaOTPWA** | Header `Authorization: Bearer nk_xxxx` | — (tanpa konsep negara) | Harga+stok langsung per layanan |
 | **OTPCepat** | `api_key` di query | Otomatis Indonesia ("Wakanda (Indo)") | 46 negara; status Waiting SMS/Recieved/Cancel/Done |
 | **DehuyOTPWA** | Header `Authorization: Bearer wh_live_…` | — (tanpa konsep negara) | Pay-per-Success (saldo terpotong hanya bila OTP masuk); Re-OTP gratis bila layanan mendukung (maks 5x); tombol 🔁 disembunyikan untuk layanan sekali-pakai |
 
@@ -25,7 +25,7 @@ Python 3, **stdlib only** (tanpa `pip install`), long-polling.
 ### 2. Ambil API key tiap provider
 - **Litensi**: dashboard litensi.id → API key.
 - **OTP Instan**: halaman API Key di dashboard → generate key.
-- **NinjaOTP**: dashboard → menu "API Keys" (format `nk_xxxx`).
+- **NinjaOTPWA**: dashboard → menu "API Keys" (format `nk_xxxx`).
 - **OTPCepat**: dashboard otpcepat.org → API key.
 
 ### 3. Isi secrets.json
@@ -88,7 +88,7 @@ nomor lain dengan pilihan yang persis sama — tanpa mengulang wizard:
 
 - *Litensi*: jalur native `setStatus=3` (request another number); nomor
   baru langsung keluar, order ID tetap.
-- *OTP Instan / NinjaOTP / OTPCepat*: order lama di-cancel (saldo
+- *OTP Instan / NinjaOTPWA / OTPCepat*: order lama di-cancel (saldo
   kembali), lalu bot otomatis order lagi dengan service/negara/operator
   yang sama. Catatan: OTP Instan baru bisa cancel setelah order berumur
   2 menit (aturan anti-abuse provider).
@@ -104,7 +104,7 @@ Catatan perilaku per provider:
 - **OTP Instan**: tidak ada endpoint finish → selesai = stop polling lokal.
   Cancel **baru bisa setelah 2 menit** (aturan anti-abuse) — bot menolak
   dengan hitung mundur bila terlalu cepat.
-- **NinjaOTP**: Selesai = `POST /orders/{id}/ack`, Batal = `POST …/cancel`
+- **NinjaOTPWA**: Selesai = `POST /orders/{id}/ack`, Batal = `POST …/cancel`
   (refund penuh), Minta ulang = `POST …/resend` (gratis).
 - **OTPCepat**: Selesai = `set_status 4`, Batal = `set_status 2` (refund),
   Minta ulang = `set_status 3`. Status order: `Waiting SMS` → `Recieved`
@@ -137,7 +137,7 @@ bot-telegram-otp/
 ## Keamanan
 
 - Bot dikunci ke satu `owner_chat_id`.
-- API key tidak pernah dikirim lewat URL (OTP Instan & NinjaOTP pakai
+- API key tidak pernah dikirim lewat URL (OTP Instan & NinjaOTPWA pakai
   header), tidak pernah di-log, dan pesan berisi key dihapus dari chat.
 - `secrets.json` / `state.json` / `bot.log` di-gitignore.
 

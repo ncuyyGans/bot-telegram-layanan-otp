@@ -18,19 +18,19 @@ BASE_URL = "https://app.ninjatop.cloud/api/public/v1"
 
 class NinjaTopProvider(OTPProvider):
     name = "ninjatop"
-    title = "NinjaOTP"
+    title = "NinjaOTPWA"
     has_countries = False
 
     ERROR_MAP = {
         "UNAUTHENTICATED": "🔑 API key salah/hilang — cek lagi dengan /setkey ninjatop.",
         "FORBIDDEN": "⛔ API key tidak punya izin untuk endpoint ini.",
-        "INSUFFICIENT_BALANCE": "💸 Saldo kurang — deposit dulu di dashboard NinjaOTP.",
+        "INSUFFICIENT_BALANCE": "💸 Saldo kurang — deposit dulu di dashboard NinjaOTPWA.",
         "OUT_OF_STOCK": "📵 Stok habis untuk layanan ini.",
         "NOT_FOUND": "Order/layanan tidak ditemukan.",
         "CONFLICT": "Order sudah tidak pending — tidak bisa diproses.",
         "VALIDATION": "Parameter tidak valid.",
         "RATE_LIMITED": "⏳ Kena rate limit — tunggu sebentar.",
-        "API_DISABLED": "🚧 API NinjaOTP sedang nonaktif.",
+        "API_DISABLED": "🚧 API NinjaOTPWA sedang nonaktif.",
     }
 
     # -- internal --
@@ -63,7 +63,7 @@ class NinjaTopProvider(OTPProvider):
             # bedakan blokir Cloudflare (WAF) vs FORBIDDEN dari API-nya
             body = (r["text"] or "").lower()
             if "cloudflare" in body or "error code:" in body:
-                return None, ("🛡️ Diblokir proteksi Cloudflare NinjaOTP — "
+                return None, ("🛡️ Diblokir proteksi Cloudflare NinjaOTPWA — "
                               "coba lagi sebentar.")
             return None, self.translate("FORBIDDEN")
         if r["http"] == 429:

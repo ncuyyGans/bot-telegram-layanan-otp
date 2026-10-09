@@ -16,7 +16,7 @@ PROVIDER_CLASSES = {
 PROVIDER_TITLES = {
     "litensi": "Litensi",
     "otpinstan": "OTP Instan",
-    "ninjatop": "NinjaOTP",
+    "ninjatop": "NinjaOTPWA",
     "otpcepat": "OTPCepat",
     "dehuy": "DehuyOTPWA",
 }
