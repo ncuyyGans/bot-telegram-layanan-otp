@@ -25,12 +25,22 @@ def vault_surrogate(connector):
         return hit[0]
     val = ""
     try:
-        bin_path = "/opt/hatch/skills/skill-creator/bin"
-        if bin_path not in sys.path:
-            sys.path.insert(0, bin_path)
-        from dynamic_credentials import dynamic_credential_entry
-        entry = dynamic_credential_entry(connector) or {}
-        val = (entry.get("surrogate") or "").strip()
+        # Lokasi bin berubah antar generasi VM (/opt/hatch vs /opt/muse) —
+        # coba kandidat yang ada agar fallback vault tidak diam-diam mati.
+        for bin_path in (
+            "/opt/hatch/skills/skill-creator/bin",
+            "/opt/muse/skills/custom-connector-setup/bin",
+            "/opt/hatch/workflow-skills/custom-connector-setup/bin",
+        ):
+            if bin_path not in sys.path:
+                sys.path.insert(0, bin_path)
+            try:
+                from dynamic_credentials import dynamic_credential_entry
+            except ImportError:
+                continue
+            entry = dynamic_credential_entry(connector) or {}
+            val = (entry.get("surrogate") or "").strip()
+            break
     except Exception:
         val = ""
     _cache[connector] = (val, now)
